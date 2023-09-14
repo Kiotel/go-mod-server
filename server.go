@@ -43,10 +43,6 @@ func main() {
 		JSONEncoder: json.Marshal,
 		JSONDecoder: json.Unmarshal,
 	})
-	err = app.Listen(":3000")
-	if err != nil {
-		return
-	}
 	app.Get("/mods", func(c *fiber.Ctx) error {
 		var mods []bson.M
 		cursor, err := modsCollection.Find(context.TODO(), bson.D{})
@@ -87,4 +83,9 @@ func main() {
 			return c.Status(201).SendString("Document successfully created!👌")
 		}
 	})
+
+	err = app.Listen(":3000") // must be in the end
+	if err != nil {
+		return
+	}
 }
