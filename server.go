@@ -64,7 +64,7 @@ func main() {
 		mod.UpdatedAt = time.Now() //mongo doesn't autofill time(
 		err := c.BodyParser(mod)
 		if err != nil {
-			return c.Status(400).SendString("Error: body fields are missing!🤐")
+			return c.Status(400).SendString("Error: body fields are missing!👀")
 		}
 
 		var foundMod Mod
@@ -82,6 +82,19 @@ func main() {
 			}
 			return c.Status(201).SendString("Document successfully created!👌")
 		}
+	})
+	app.Get("/delete/:name", func(c *fiber.Ctx) error {
+		name := c.Params("name")
+		var deletedDocument bson.M
+		err := modsCollection.FindOneAndDelete(context.TODO(), bson.D{{"name", name}}).Decode(&deletedDocument)
+		if err != nil {
+			if errors.Is(err, mongo.ErrNoDocuments) {
+				return c.Status(404).SendString("Error: file not exists!👀")
+			} else {
+				return c.Status(400).SendString("Error: unknown error on delete!🤐")
+			}
+		}
+		return c.Status(200).SendString("Document successfully removed!🙈")
 	})
 
 	err = app.Listen(":3000") // must be in the end
