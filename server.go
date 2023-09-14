@@ -57,9 +57,9 @@ func main() {
 			}
 			mods = append(mods, mod)
 		}
-		return c.JSON(mods)
+		return c.Status(200).JSON(mods)
 	})
-	app.Post("/create", func(c *fiber.Ctx) error {
+	app.Put("/create", func(c *fiber.Ctx) error {
 		mod := new(Mod)
 		mod.UpdatedAt = time.Now() //mongo doesn't autofill time(
 		err := c.BodyParser(mod)
@@ -73,7 +73,7 @@ func main() {
 		if !errors.Is(err, mongo.ErrNoDocuments) { //if mod exists yet it'll be updated otherwise created
 			mod.CreatedAt = foundMod.CreatedAt
 			modsCollection.FindOneAndUpdate(context.TODO(), bson.D{{"name", foundMod.Name}}, bson.D{{"$set", mod}})
-			return c.Status(201).SendString("Document successfully updated!👍")
+			return c.Status(204).SendString("Document successfully updated!👍")
 		} else {
 			mod.CreatedAt = time.Now()
 			_, err := modsCollection.InsertOne(context.TODO(), mod)
@@ -83,18 +83,31 @@ func main() {
 			return c.Status(201).SendString("Document successfully created!👌")
 		}
 	})
-	app.Get("/delete/:name", func(c *fiber.Ctx) error {
+	app.Delete("/delete/:name", func(c *fiber.Ctx) error {
 		name := c.Params("name")
 		var deletedDocument bson.M
 		err := modsCollection.FindOneAndDelete(context.TODO(), bson.D{{"name", name}}).Decode(&deletedDocument)
 		if err != nil {
 			if errors.Is(err, mongo.ErrNoDocuments) {
-				return c.Status(404).SendString("Error: file not exists!👀")
+				return c.Status(404).SendString("Error: document not exists!👀")
 			} else {
 				return c.Status(400).SendString("Error: unknown error on delete!🤐")
 			}
 		}
-		return c.Status(200).SendString("Document successfully removed!🙈")
+		return c.Status(204).SendString("Document successfully removed!🙈")
+	})
+	app.Get("/find/:name", func(c *fiber.Ctx) error {
+		name := c.Params("name")
+		var foundDocument bson.M
+		err := modsCollection.FindOne(context.TODO(), bson.D{{"name", name}}).Decode(&foundDocument)
+		if err != nil {
+			if errors.Is(err, mongo.ErrNoDocuments) {
+				return c.Status(404).SendString("Error: document not exists!👀")
+			} else {
+				return c.Status(400).SendString("Error: unknown error!🤐")
+			}
+		}
+		return c.Status(200).JSON(foundDocument)
 	})
 
 	err = app.Listen(":3000") // must be in the end
