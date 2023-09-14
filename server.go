@@ -31,96 +31,116 @@ func main() {
 	}()
 
 	fmt.Print("ping...")
-	err = client.Ping(context.TODO(), nil)
-	if err != nil {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if err := client.Ping(ctx, nil); err != nil {
 		panic(err)
-	} else {
-		fmt.Println("pong")
 	}
+	fmt.Println("pong")
+
 	modsCollection := client.Database("suxen").Collection("mods")
 
 	app := fiber.New(fiber.Config{
 		JSONEncoder: json.Marshal,
 		JSONDecoder: json.Unmarshal,
 	})
+
 	app.Get("/mods", func(c *fiber.Ctx) error {
 		cursor, err := modsCollection.Find(context.TODO(), bson.D{})
 		if err != nil {
-			return err
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+				"error": "Failed to retrieve documents",
+			})
 		}
+		defer cursor.Close(context.TODO())
 
 		var mods []bson.M
-		for cursor.Next(context.TODO()) {
-			var mod bson.M
-			err := cursor.Decode(&mod)
-			if err != nil {
-				return err
-			}
-			mods = append(mods, mod)
+		if err := cursor.All(context.TODO(), &mods); err != nil {
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+				"error": "Failed to decode documents",
+			})
 		}
 
-		return c.Status(200).JSON(mods)
+		return c.Status(fiber.StatusOK).JSON(mods)
 	})
+
 	app.Put("/create", func(c *fiber.Ctx) error {
 		mod := new(Mod)
-		mod.UpdatedAt = time.Now() //mongo doesn't autofill time(
+		mod.UpdatedAt = time.Now() // mongo doesn't autofill time
 
-		err := c.BodyParser(mod)
-		if err != nil {
-			return c.Status(400).SendString("Error: body fields are missing!👀")
+		if err := c.BodyParser(mod); err != nil {
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+				"error": "Body fields are missing",
+			})
 		}
 
 		var foundMod Mod
-		err = modsCollection.FindOne(context.TODO(), bson.D{{"name", mod.Name}}).Decode(&foundMod)
+		if err := modsCollection.FindOne(context.TODO(), bson.D{{"name", mod.Name}}).Decode(&foundMod); err != nil {
+			if !errors.Is(err, mongo.ErrNoDocuments) {
+				return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+					"error": "Unknown error occurred",
+				})
+			}
+		}
 
-		if !errors.Is(err, mongo.ErrNoDocuments) { //if mod exists yet it'll be updated otherwise created
+		if foundMod.Name != "" {
 			mod.CreatedAt = foundMod.CreatedAt
-			modsCollection.FindOneAndUpdate(context.TODO(), bson.D{{"name", foundMod.Name}}, bson.D{{"$set", mod}})
-
-			return c.Status(204).SendString("Document successfully updated!👍")
-		} else {
-			mod.CreatedAt = time.Now()
-			_, err := modsCollection.InsertOne(context.TODO(), mod)
-			if err != nil {
-				return c.Status(400).SendString("Error: document not created!🤐")
+			if _, err := modsCollection.UpdateOne(context.TODO(), bson.D{{"name", foundMod.Name}}, bson.D{{"$set", mod}}); err != nil {
+				return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+					"error": "Error occurred during document update",
+				})
 			}
 
-			return c.Status(201).SendString("Document successfully created!👌")
+			return c.Status(fiber.StatusNoContent).SendString("Document successfully updated")
 		}
+
+		mod.CreatedAt = time.Now()
+		if _, err := modsCollection.InsertOne(context.TODO(), mod); err != nil {
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+				"error": "Error occurred during document creation",
+			})
+		}
+
+		return c.Status(fiber.StatusCreated).SendString("Document successfully created")
 	})
+
 	app.Delete("/delete/:name", func(c *fiber.Ctx) error {
 		name := c.Params("name")
 
 		var deletedDocument bson.M
-		err := modsCollection.FindOneAndDelete(context.TODO(), bson.D{{"name", name}}).Decode(&deletedDocument)
-		if err != nil {
+		if err := modsCollection.FindOneAndDelete(context.TODO(), bson.D{{"name", name}}).Decode(&deletedDocument); err != nil {
 			if errors.Is(err, mongo.ErrNoDocuments) {
-				return c.Status(404).SendString("Error: document not exists!👀")
-			} else {
-				return c.Status(400).SendString("Error: unknown error on delete!🤐")
+				return c.Status(fiber.StatusNotFound).JSON(fiber.Map{
+					"error": "Document does not exist",
+				})
 			}
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+				"error": "Unknown error occurred during deletion",
+			})
 		}
 
-		return c.Status(204).SendString("Document successfully removed!🙈")
+		return c.Status(fiber.StatusNoContent).SendString("Document successfully removed")
 	})
+
 	app.Get("/find/:name", func(c *fiber.Ctx) error {
 		name := c.Params("name")
 
 		var foundDocument bson.M
-		err := modsCollection.FindOne(context.TODO(), bson.D{{"name", name}}).Decode(&foundDocument)
-		if err != nil {
+		if err := modsCollection.FindOne(context.TODO(), bson.D{{"name", name}}).Decode(&foundDocument); err != nil {
 			if errors.Is(err, mongo.ErrNoDocuments) {
-				return c.Status(404).SendString("Error: document not exists!👀")
-			} else {
-				return c.Status(400).SendString("Error: unknown error!🤐")
+				return c.Status(fiber.StatusNotFound).JSON(fiber.Map{
+					"error": "Document does not exist",
+				})
 			}
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+				"error": "Unknown error occurred",
+			})
 		}
 
-		return c.Status(200).JSON(foundDocument)
+		return c.Status(fiber.StatusOK).JSON(foundDocument)
 	})
 
-	err = app.Listen(":3000") // must be in the end
-	if err != nil {
-		return
+	if err := app.Listen(":3000"); err != nil {
+		panic(err)
 	}
 }
