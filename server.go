@@ -4,22 +4,35 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"github.com/gofiber/fiber/v2"
+	"github.com/gofiber/fiber/v2/middleware/cors"
+	"github.com/rs/zerolog"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
+	"os"
+	"strconv"
 	"time"
 )
 
 type Mod struct {
 	Name        string    `json:"name" bson:"name"`
 	Description string    `json:"description" bson:"description"`
+	Image       string    `json:"image" bson:"image"`
 	CreatedAt   time.Time `bson:"created_at"`
 	UpdatedAt   time.Time `bson:"updated_at"`
 }
 
 func main() {
+	zerolog.TimeFieldFormat = zerolog.TimeFormatUnix
+	log := zerolog.New(zerolog.ConsoleWriter{Out: os.Stderr, TimeFormat: time.RFC3339}).
+		Level(zerolog.TraceLevel).
+		With().
+		Timestamp().
+		Caller().
+		Int("pid", os.Getpid()).
+		Logger()
+
 	client, err := mongo.Connect(context.TODO(), options.Client().ApplyURI("mongodb://127.0.0.1:27017/"))
 	if err != nil {
 		panic(err)
@@ -30,13 +43,13 @@ func main() {
 		}
 	}()
 
-	fmt.Print("ping...")
+	log.Info().Msg("ping")
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	if err := client.Ping(ctx, nil); err != nil {
 		panic(err)
 	}
-	fmt.Println("pong")
+	log.Info().Msg("pong")
 
 	modsCollection := client.Database("suxen").Collection("mods")
 
@@ -45,8 +58,21 @@ func main() {
 		JSONDecoder: json.Unmarshal,
 	})
 
+	app.Use(cors.New())
+
+	app.Get("/accd", func(c *fiber.Ctx) error {
+		return c.Status(fiber.StatusOK).JSON(fiber.Map{
+			"message": "abed",
+		})
+	})
 	app.Get("/mods", func(c *fiber.Ctx) error {
-		cursor, err := modsCollection.Find(context.TODO(), bson.D{})
+		page, err := strconv.Atoi(c.Query("page", "-1"))
+		var opts *options.FindOptions
+		if page != -1 {
+			opts = options.Find().SetLimit(int64(page * 20)).SetSkip(int64(page*20 - 20))
+		}
+
+		cursor, err := modsCollection.Find(context.TODO(), bson.D{}, opts)
 		if err != nil {
 			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 				"error": "Failed to retrieve documents",
