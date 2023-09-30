@@ -60,19 +60,39 @@ func main() {
 
 	app.Use(cors.New())
 
-	app.Get("/accd", func(c *fiber.Ctx) error {
+	app.Get("/amogus", func(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusOK).JSON(fiber.Map{
-			"message": "abed",
+			"amogus": "amogus",
 		})
 	})
+
+	// return all mods by default
+	// empty array if not found anything
+	// all mods if query pageSize <= 0 or page <= 0
 	app.Get("/mods", func(c *fiber.Ctx) error {
-		page, err := strconv.Atoi(c.Query("page", "-1"))
-		var opts *options.FindOptions
-		if page != -1 {
-			opts = options.Find().SetLimit(int64(page * 20)).SetSkip(int64(page*20 - 20))
+		page, err := strconv.Atoi(c.Query("page", "0"))
+		if err != nil {
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+				"error": "Invalid page value",
+			})
+		}
+		pageSize, err := strconv.Atoi(c.Query("pageSize", "0"))
+		if err != nil {
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+				"error": "Invalid pageSize value",
+			})
+		}
+		filter := bson.D{{}} // selects all documents
+		opts := new(options.FindOptions)
+
+		var start int64 = 0
+		if pageSize > 0 && page > 0 {
+			var end int64 = int64(page * pageSize)
+			start = end - int64(pageSize)
+			opts.SetLimit(int64(end))
 		}
 
-		cursor, err := modsCollection.Find(context.TODO(), bson.D{}, opts)
+		cursor, err := modsCollection.Find(context.TODO(), filter, opts)
 		if err != nil {
 			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 				"error": "Failed to retrieve documents",
@@ -86,8 +106,13 @@ func main() {
 				"error": "Failed to decode documents",
 			})
 		}
-
-		return c.Status(fiber.StatusOK).JSON(mods)
+		var result []bson.M
+		if len(mods) > int(start) {
+			result = mods[start:]
+		} else {
+			result = []bson.M{}
+		}
+		return c.Status(fiber.StatusOK).JSON(result)
 	})
 
 	app.Put("/create", func(c *fiber.Ctx) error {
